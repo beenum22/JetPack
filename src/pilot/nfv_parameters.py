@@ -265,6 +265,26 @@ class NfvParameters(object):
                 type(error).__name__, str(error))
             raise Exception("Failed to get memory size {}".format(message))
 
+    def calculate_reserved_mem(self, total_mem_mbs, host_mem_mbs):
+        # According to Red Hat:
+        # The bigger physical RAM size is, the smaller 
+        # is the ratio of the memory which cannot be 
+        # used to the total physical RAM size.
+        # On 12Gb desktop this ratio is around 4.5%
+        # On 32Gb server this ratio is around 2%.
+        # On 512Gb server this ratio is around 1.56%
+        ratio = None
+        reserved_mem = None
+        if total_mem_mbs <= 12288:
+            ratio = 4.5
+        elif 12288 < total_mem_mbs <= 32768:
+            ratio = 2
+        elif total_mem_mbs > 32768:
+            ratio = 1.56
+        kernel_mem = int(round((int(total_mem_mbs) * ratio) / 100))
+        reserved_mem = int(host_mem_mbs) + self.round_to_nearest(kernel_mem, 1024)
+        return reserved_mem
+
     def calculate_hugepage_count(self, hugepage_size):
         try:
             memory_count = self.get_minimum_memory_size("compute")
@@ -273,8 +293,9 @@ class NfvParameters(object):
                 raise Exception("RAM size is less than 128GB"
                                 "make sure to have all prerequisites")
             # Subtracting
-            # 16384MB = (Host Memory 12GB + Kernel Memory 4GB)
-            memory_count = (memory_count - 16384)
+            # 12288MB = (Host Memory 12GB)
+            reserved_mem = self.calculate_reserved_mem(memory_count, 12288)
+            memory_count = (memory_count - reserved_mem)
             if hugepage_size == "2MB":
                 hugepage_count = (memory_count / 2)
             if hugepage_size == "1GB":
